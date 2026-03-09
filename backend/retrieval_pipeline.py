@@ -352,7 +352,7 @@ class RetrievalPipeline:
         srch_res = self.bm25_index.search(query, top_k)
 
         return [{"chunk_id": self.chunks[idx]["chunk_id"],
-                "score": score, "payload": self.chunks[idx]["text"]} for idx, score in srch_res]
+                "score": score, "payload": self.chunks[idx]} for idx, score in srch_res]
     
     def hybrid_search(self, query: str, semantic_top_k: int = 30, bm25_top_k: int = 30) -> list[dict]:
         """
