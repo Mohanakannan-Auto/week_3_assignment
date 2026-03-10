@@ -54,10 +54,10 @@ async def lifespan(app: FastAPI):
     print("="*60)
     
     config = GenerationConfig(
-        llm_provider="openai",
+        #llm_model="openai", As Model is already provided in rag_generate
         retrieval_top_k=8,
-        refine_query=True,
-        use_reranker=True
+        refine_query=False,
+        #use_reranker=True
     )
     
     rag_generator = RAGGenerator(config)

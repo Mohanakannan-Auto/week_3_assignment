@@ -185,7 +185,6 @@ class RAGGenerator:
         Returns:
             Formatted context string
         """
-        print(f"DEBUG: {results[0]}")
         frmtd_str = []
 
         for idx, result in enumerate(results, start = 1):
@@ -226,7 +225,7 @@ class RAGGenerator:
         Returns:
             List of unique source metadata dicts
         """
-        seen = {}
+        seen = []
         for res in results:
             if res.title not in seen:
                 seen.append({
@@ -238,7 +237,7 @@ class RAGGenerator:
                    "acm_url": res.acm_url,
                    "abstract_url": res.abstract_url,
                })
-        return list(seen.values())
+        return list(seen)
     
     def _call_llm(self, query: str, context: str) -> str:
         """
@@ -302,7 +301,7 @@ class RAGGenerator:
         resp = requests.post(f"{self.openrouter_base_url}/chat/completions", headers = pyld_head, json = pyld_data)
         
         if resp.status_code != 200:
-            print(f"DEBUG: {resp.status_code}")
+            print(f"DEBUG: Status {resp.status_code}")
             raise Exception("Failed to generate embedding")
         else:
             resp_json = resp.json()
@@ -358,13 +357,15 @@ class RAGGenerator:
                 "answer": "I couldn't find any relevant papers to answer this question.",
                 "sources": []
                 }
-        cmb_cntxt = self._format_context(list(results))
+        # Limit chunks to stay under free tier token limit (~10k)
+        results_limtd = list(results)[:3]
+        cmb_cntxt = self._format_context(results_limtd)
         ans = self._call_llm(query, cmb_cntxt)
         return {
             "query": query,
             "refined_query": None,
             "answer": ans,
-            "sources": self._build_sources_metadata(results) if return_sources else []
+            "sources": self._build_sources_metadata(results_limtd) if return_sources else []
         }
 
 # =============================================================================
