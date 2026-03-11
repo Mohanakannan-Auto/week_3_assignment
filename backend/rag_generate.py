@@ -65,9 +65,9 @@ class GenerationConfig:
     """Configuration for the RAG generator."""
     llm_model: str = "openai/gpt-4o"  # Model to use for answer generation
     temperature: float = 0.1  # Low temperature for factual answers
-    max_tokens: int = 2000  # Max length of generated answer
+    max_tokens: int = 1350  # Max length of generated answer (reduced for credit limit)
     openrouter_api_key: Optional[str] = None  # Will load from env if not set
-    refine_query: bool = True  # Whether to refine queries before retrieval
+    refine_query: bool = False  # Whether to refine queries before retrieval
     refinement_model: str = "openai/gpt-3.5-turbo"  # Cheaper model for refinement
     retrieval_top_k: int = 8  # Number of chunks to retrieve
 
@@ -112,9 +112,9 @@ class RAGGenerator:
             config: Optional configuration object
             retrieval_pipeline: Optional pre-initialized retrieval pipeline
         """
-        self.config = GenerationConfig()
-        self.retrieval = RetrievalPipeline()
-        self.openrouter_api_key = self.retrieval.config.openrouter_api_key
+        self.config = config or GenerationConfig()
+        self.retrieval = retrieval_pipeline or RetrievalPipeline()
+        self.openrouter_api_key = self.config.openrouter_api_key or os.getenv("OPENROUTER_API_KEY")
         
         if not self.openrouter_api_key:
                raise ValueError("OPENROUTER_API_KEY not set")
@@ -155,7 +155,8 @@ class RAGGenerator:
         Returns:
             Refined query (or original if refinement disabled/fails)
         """
-        pass
+        if not self.config.refine_query:
+            return query
     
     def _format_context(self, results: list[RetrievalResult]) -> str:
         """
@@ -225,10 +226,12 @@ class RAGGenerator:
         Returns:
             List of unique source metadata dicts
         """
-        seen = []
+        seen = set()
+        sources = []
         for res in results:
             if res.title not in seen:
-                seen.append({
+                seen.add(res.title)
+                sources.append({
                    "title": res.title,
                    "authors": res.authors,
                    "pdf_url": res.pdf_url,
@@ -237,7 +240,9 @@ class RAGGenerator:
                    "acm_url": res.acm_url,
                    "abstract_url": res.abstract_url,
                })
-        return list(seen)
+        
+        assert isinstance(sources, list), f"sources must be a list, got {type(sources)}"
+        return sources
     
     def _call_llm(self, query: str, context: str) -> str:
         """
@@ -284,8 +289,14 @@ class RAGGenerator:
         Returns:
             Generated answer string
         """
-        usr_msg = rf'''Based on the following research paper excerpts, answer this question.\n\n\
-            Question: {query}\n\n\Research Paper Excerpts:\n{context}'''
+        usr_msg = f'''Based on the following research paper excerpts, answer this question.
+        
+        Question: {query}
+        
+        Research Paper Excerpts:
+        {context}
+        
+        Remember to cite papers using [Paper Title] format.'''
 
         pyld_head = {"Authorization": f"Bearer {self.openrouter_api_key}", "Content-Type": "application/json"}
         
@@ -298,10 +309,10 @@ class RAGGenerator:
             "temperature": self.config.temperature,
             "max_tokens": self.config.max_tokens
             }
-        resp = requests.post(f"{self.openrouter_base_url}/chat/completions", headers = pyld_head, json = pyld_data)
+        
+        resp = requests.post(f"{self.openrouter_base_url}/chat/completions", headers=pyld_head, json=pyld_data)
         
         if resp.status_code != 200:
-            print(f"DEBUG: Status {resp.status_code}")
             raise Exception("Failed to generate embedding")
         else:
             resp_json = resp.json()
@@ -348,24 +359,25 @@ class RAGGenerator:
         Returns:
             Dict with query, refined_query, answer, and sources
         """
-        pipeline = RetrievalPipeline()
-        results = pipeline.retrieve(query, top_k)
+        refined = self.refine_query(query)
+        top_k = top_k or self.config.retrieval_top_k
+        results = self.retrieval.retrieve(refined, top_k)
+        
         if not results:
             return {
                 "query": query,
-                "refined_query": None,
+                "refined_query": refined if refined != query else None,
                 "answer": "I couldn't find any relevant papers to answer this question.",
                 "sources": []
-                }
-        # Limit chunks to stay under free tier token limit (~10k)
-        results_limtd = list(results)[:3]
-        cmb_cntxt = self._format_context(results_limtd)
-        ans = self._call_llm(query, cmb_cntxt)
+            }
+        cntxt = self._format_context(results)
+        ans = self._call_llm(query, cntxt)
+        
         return {
             "query": query,
-            "refined_query": None,
+            "refined_query": refined if refined != query else None,
             "answer": ans,
-            "sources": self._build_sources_metadata(results_limtd) if return_sources else []
+            "sources": self._build_sources_metadata(results) if return_sources else []
         }
 
 # =============================================================================

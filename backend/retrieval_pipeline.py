@@ -123,11 +123,9 @@ class OpenRouterEmbedder:
         pyld_head = dict({"Content-Type": "application/json", "Authorization": f"Bearer {self.api_key}"})
         pyld_data = dict({"model": self.model, "input": text})
         emb_mdl = f"{self.base_url}/embeddings"
-        
         resp = requests.post(emb_mdl, headers = pyld_head, data = json.dumps(pyld_data))
 
         if resp.status_code != 200:
-            embedding = []
             raise Exception("Failed to generate embedding")
         else:
             cont_json = resp.json()
